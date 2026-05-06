@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>GitHub图床管理工具</title>
+  <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+    body {
+      max-width: 800px;
+      margin: 20px auto;
+      padding: 0 20px;
+      font-family: Arial, sans-serif;
+    }
+    img {
+      max-width: 100px;
+      border-radius: 6px;
+      margin-right: 10px;
+      vertical-align: middle;
+    }
+    .item {
+      padding: 10px;
+      border: 1px solid #eee;
+      margin: 8px 0;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .info {
+      flex: 1;
+      padding: 0 10px;
+    }
+    button {
+      padding: 6px 10px;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      margin-left: 6px;
+    }
+    .copy {
+      background: #409eff;
+      color: white;
+    }
+    .del {
+      background: #f56c6c;
+      color: white;
+    }
+    input {
+      padding: 6px;
+      width: 100%;
+      margin-top: 6px;
+    }
+    .empty {
+      padding: 20px;
+      text-align: center;
+      color: #999;
+      border: 1px dashed #eee;
+      border-radius: 8px;
+    }
+  </style>
+</head>
+<body>
+  <h2>GitHub 图床管理工具</h2>
+  <div id="tokenInput" style="margin-bottom: 20px; padding: 15px; background: #f5f5f5; border-radius: 8px;">
+    <label>GitHub Access Token:</label><br>
+    <input type="password" id="tokenField" placeholder="请输入你的 GitHub Personal Access Token" style="width: 100%; max-width: 500px; margin-top: 8px;">
+    <button onclick="setToken()" style="margin-left: 10px; background: #409eff; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer;">确认</button>
+    <p style="font-size: 12px; color: #666; margin-top: 8px;">提示：Token 需要有 repo 权限，且不要分享给他人</p>
+  </div>
+  <h3>已上传图片列表</h3>
+  <div id="imageList"></div>
+  <input type="file" id="fileInput" accept="image/*">
+  <div id="result" style="margin-top:20px;"></div>
+
+  <script>
+    // ========== 配置项 ==========
+    const REPO = "cz-liang/lcz-image-bed";
+    const BRANCH = "main";
+    const PATH = "images/";
+    // GitHub Token 将在使用时由用户输入
+    let GITHUB_TOKEN = '';
+    // =============================
+
+    let imageListCache = [];
+
+    function setToken() {
+      const token = document.getElementById('tokenField').value.trim();
+      if (token) {
+        GITHUB_TOKEN = token;
+        alert('Token 设置成功！');
+        getImageList();
+      } else {
+        alert('请输入有效的 Token');
+      }
+    }
+
+    window.onload = function() {
+      const savedToken = localStorage.getItem('github_token');
+      if (savedToken) {
+        GITHUB_TOKEN = savedToken;
+        document.getElementById('tokenField').value = savedToken;
+        getImageList();
+      } else {
+        document.getElementById('imageList').innerHTML = '<div class="empty">请先输入 GitHub Token</div>';
+      }
+    };
+
+    // ==============================================
+    // ✅ 终极防缓存：每次都带随机时间戳，强制从服务器拿最新数据
+    // ==============================================
+    // async function getImageList() {
+    //   try {
+    //     const { data } = await axios({
+    //       method: "get",
+    //       url: `https://api.github.com/repos/${REPO}/contents/${PATH}`,
+    //       headers: {
+    //         // 不适用这个方案（有缓存）
+    //         // 注意：当从 file:// 协议（直接打开 HTML 文件）访问 GitHub API 时，origin 是 null ，GitHub 的 CORS 策略不允许在请求中添加 Cache-Control 、 Pragma 、 Expires 这些自定义头。
+    //         // 新增以下缓存控制头
+    //         'Cache-Control': 'no-cache, no-store, must-revalidate',
+    //         'Pragma': 'no-cache',
+    //         'Expires': '0'
+    //       },
+    //       params: {
+    //         t: new Date().getTime() + Math.random()
+    //       }
+    //     });
+    //     imageListCache = data;
+    //     renderList();
+    //   } catch (e) {
+    //     if (e.response?.status === 404) {
+    //       imageListCache = [];
+    //       renderList();
+    //     }
+    //   }
+    // }
+    async function getImageList() {
+      if (!GITHUB_TOKEN) {
+        document.getElementById('imageList').innerHTML = '<div class="empty">请先输入 GitHub Token</div>';
+        return;
+      }
+      try {
+        const response = await fetch(
+          `https://api.github.com/repos/${REPO}/contents/${PATH}?t=${new Date().getTime() + Math.random()}`,
+          {
+            method: 'GET',
+            headers: {
+              Authorization: `token ${GITHUB_TOKEN}`
+            },
+            cache: 'no-store'
+          }
+        );
+        
+        if (response.status === 404) {
+          imageListCache = [];
+          renderList();
+          return;
+        }
+        
+        imageListCache = await response.json();
+        renderList();
+      } catch (e) {
+        console.error('Error:', e);
+      }
+    }
+
+    // 渲染列表
+    function renderList() {
+      const dom = document.getElementById("imageList");
+      dom.innerHTML = "";
+      if (!imageListCache || imageListCache.length === 0) {
+        dom.innerHTML = '<div class="empty">暂无图片，请上传</div>';
+        return;
+      }
+      imageListCache.forEach(item => {
+        if (item.type === "file") {
+          const url = `https://cdn.jsdelivr.net/gh/${REPO}@${BRANCH}/${PATH}${item.name}`;
+          dom.innerHTML += `
+            <div class="item" data-name="${item.name}">
+              <img src="${url}" alt="">
+              <div class="info">${item.name}</div>
+              <button class="copy" onclick="copy('${url}')">复制链接</button>
+              <button class="del" onclick="delImage('${item.name}', '${item.sha}')">删除</button>
+            </div>
+          `;
+        }
+      });
+    }
+
+    // 复制
+    function copy(url) {
+      const input = document.createElement("input");
+      input.value = url;
+      document.body.appendChild(input);
+      input.select();
+      document.execCommand("copy");
+      document.body.removeChild(input);
+      alert("复制成功！");
+    }
+
+    // 删除图片（删除后强制刷新列表）
+    async function delImage(name, sha) {
+      if (!GITHUB_TOKEN) {
+        alert('请先输入 GitHub Token');
+        return;
+      }
+      if (!confirm("确定删除这张图片？")) return;
+      try {
+        await axios({
+          method: "delete",
+          url: `https://api.github.com/repos/${REPO}/contents/${PATH}${name}`,
+          headers: {
+            Authorization: `token ${GITHUB_TOKEN}`
+          },
+          data: {
+            message: "delete image",
+            sha: sha,
+            branch: BRANCH
+          },
+          params: { t: new Date().getTime() }
+        });
+
+        // 重点：删除后立刻重新拉取最新列表
+        getImageList();
+        alert("删除成功！");
+      } catch (err) {
+        alert("删除失败");
+        console.log(err);
+      }
+    }
+
+    // 上传（原始文件名 + 自动建文件夹）
+    async function uploadWithFolderCheck(file) {
+      if (!GITHUB_TOKEN) {
+        alert('请先输入 GitHub Token');
+        return;
+      }
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = async () => {
+        const base64Str = reader.result.split(',')[1];
+        const fileName = file.name;
+        const path = `${PATH}${fileName}`;
+
+        try {
+          await axios({
+            method: 'put',
+            url: `https://api.github.com/repos/${REPO}/contents/${path}`,
+            headers: { Authorization: `token ${GITHUB_TOKEN}` },
+            data: { message: 'upload', content: base64Str, branch: BRANCH }
+          });
+        } catch (e) {
+          if (e.response?.status === 404) {
+            await axios({
+              method: 'put',
+              url: `https://api.github.com/repos/${REPO}/contents/${PATH}.gitkeep`,
+              headers: { Authorization: `token ${GITHUB_TOKEN}` },
+              data: { message: 'create folder', content: '', branch: BRANCH }
+            });
+            await axios({
+              method: 'put',
+              url: `https://api.github.com/repos/${REPO}/contents/${path}`,
+              headers: { Authorization: `token ${GITHUB_TOKEN}` },
+              data: { message: 'upload', content: base64Str, branch: BRANCH }
+            });
+          }
+          if (e.response?.status === 422) {
+            alert('上传失败：已存在同名文件！');
+            return;
+          }
+        }
+
+        const url = `https://cdn.jsdelivr.net/gh/${REPO}@${BRANCH}/${path}`;
+        document.getElementById('result').innerHTML = `
+          <p>上传成功！</p>
+          <img src="${url}" width="300">
+          <input value="${url}" style="width:100%">
+        `;
+        getImageList();
+      };
+    }
+
+    document.getElementById('fileInput').addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      uploadWithFolderCheck(file);
+    });
+  </script>
+</body>
+</html>
